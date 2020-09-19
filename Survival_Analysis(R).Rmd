@@ -1,0 +1,191 @@
+---
+title: "Survival_Analysis"
+author: "Garima Gupta"
+date: "15/09/2020"
+output: html_document
+---
+
+Survival Analysis is analyzing data with time change.We try to understand the estimate of occurence of particular event with length of time.The survival analysis helps in the predicting the occurence of the event next time.That is analyzing the duration of time for particular state.There are three core components for analyzing survival analysis with statistical methods.
+The Survival Analysis is different from churn analysis as it takes into account the concept of "Censoring".The Censoring is defined as the observations that is incomplete data which is assumed to be non-informative. Censoring is never caused by the "event" defining endpoints of experiment.The observations that are censored do not mean that the event for that observation occured like patient who is censored do not mean that they died.
+We are making use of Ovaries dataset for Survival Analysis.
+
+```{r}
+# Load required packages
+library(survival)
+#install.packages("survminer")
+library(survminer)
+library(dplyr)
+```
+
+
+The Ovarian dataset comprises of a cohort of ovarian cancer patients and respective clinical information, including the time patients were tracked until they either died or were lost to follow-up (futime), whether patients were censored or not (fustat), patient age, treatment group assignment, presence of residual disease and performance status.
+
+```{r}
+
+# Importing the ovarian cancer dataset and have a look at it
+data(ovarian)
+str(ovarian)
+```
+
+Checking for the censored observation in the dataset and visualizing using Barplot:
+```{r}
+# Counting censored and uncensored data
+num_cens <- table(ovarian$fustat)
+num_cens
+
+# for column fustat "1" indicates that event is occured(patient died) and "0" indicates observation to be censored
+# Creating barplot of censored and uncensored data
+barplot(num_cens)
+
+```
+
+
+We can see the number of patients who are censored in the Ovarian dataset is more than the patients who died.
+
+
+
+The "futime" column holds the survival times. And "fustat" is the response variable explains if an individual patients survival time is censored. For making use of a ge as a predictive variable in the model we need to convert it from continuous series to categorical bins.
+```{r}
+# changing data labels for column in the dataset
+ovarian$rx <- factor(ovarian$rx, 
+                     levels = c("1", "2"), 
+                     labels = c("A", "B"))
+ovarian$resid.ds <- factor(ovarian$resid.ds, 
+                           levels = c("1", "2"), 
+                           labels = c("no", "yes"))
+ovarian$ecog.ps <- factor(ovarian$ecog.ps, 
+                          levels = c("1", "2"), 
+                          labels = c("good", "bad"))
+
+```
+```{r}
+# Checking for the distribution of Age variable in the ovarian dataset:
+
+hist(ovarian$age)
+
+```
+
+```{r}
+# Dichotomize age- dividing age variable in to two bins
+# Making into two bins : OLD & YOUNG
+ovarian <- ovarian %>% mutate(age_group = ifelse(age >=50, "old", "young"))
+
+# Converting Age variable into factor variable
+ovarian$age_group <- factor(ovarian$age_group)
+
+# for column fustat "1" indicates that event is occured(died) and "0" indicates observation to be censored
+head(ovarian)
+```
+
+```{r}
+#Creating Survival object defining the duraion time period and the censored data column
+surv_object <- Surv(time = ovarian$futime, event = ovarian$fustat)
+surv_object 
+
+# All the points with '+' after recorded datapoint is censored observation
+summary(surv_object)
+```
+
+In the Survival context, survival function S(t)=1-F(t)=P(T>t) is defined as the probability to survive beyond a timepoint(t), where occurence of the event is at time(T).The Survival function is a function over time and for any point in time we can state how probable it is to survive longer than that point in Time.
+
+The survival curves also gives percentage value of duration taking longer than (t) using S(t).100
+
+#### ESTIMATING SURVIVAL FUNCTION USING KAPLAN-MEIER ESTIMATE:
+
+Kaplan-meier Estimate = π [(ni - di)/ni] where;
+ni: number of individuals under observation at time
+di: number of individual dieing at time (ti)
+
+
+```{r}
+# Fitting of Kaplan-Meier curve using the survival object created
+fit <- survfit(surv_object ~ rx, data = ovarian)
+summary(fit)
+```
+
+```{r}
+# Visualizing Survival fit along with p-value 
+ggsurvplot(fit, data = ovarian, pval = TRUE, risk.table = TRUE,cumevents = TRUE,cumcensor = TRUE, tables.height = 0.5)
+
+```
+
+```{r}
+# Examine prdictive value of residual disease status
+fit1 <- survfit(surv_object ~ resid.ds, data = ovarian)
+ggsurvplot(fit1, data = ovarian, pval = TRUE,risk.table = TRUE,cumevents = TRUE,cumcensor = TRUE, tables.height = 0.5)
+
+```
+
+Cox model is a semi-parametric model, which is less strict to distributional assumptions.The cox model is also called as proportional hazard model.
+```{r}
+# Fit a Cox proportional hazards model
+fit.coxph <- coxph(surv_object ~ rx + resid.ds + age_group + ecog.ps, 
+                   data = ovarian)
+ggforest(fit.coxph, data = ovarian)
+
+```
+
+#### Estimating median survival from a Weibull model
+```{r}
+wb <- survreg(Surv(time = ovarian$futime, event = ovarian$fustat) ~ 1, data = ovarian)
+
+# Compute the median survival from the model
+predict(wb, type = "quantile", p = 1-0.5, newdata = data.frame(1))
+
+```
+After fitting the Weibull model we can say that half of the ovarian patients live longer than 880 days and half die before 880 days.
+
+
+```{r}
+# Weibull model
+wb <- survreg(Surv(time = ovarian$futime, event = ovarian$fustat) ~ 1, data = ovarian)
+
+# Retrieve survival curve from model
+surv <- seq(.99, .01, by = -.01)
+
+# Get time for each probability
+t <- predict(wb, type = "quantile", p = 1-surv, newdata = data.frame(1))
+
+# Create data frame with the information needed for ggsurvplot_df
+surv_wb <- data.frame(time = t, surv = surv, 
+  upper = NA, lower = NA, std.err = NA)
+
+# Plot
+ggsurvplot_df(fit = surv_wb, surv.geom = geom_line)
+
+```
+
+```{r}
+#Interpreting coefficients
+wbmod <- survreg(Surv(time = ovarian$futime, event = ovarian$fustat) ~ rx, data = ovarian)
+coef(wbmod)
+
+```
+ The rxB(Group B) coefficient is positive which means Group B after treatement tend to survive longer.
+
+```{r}
+#Interpreting coefficients
+wbmod1 <- survreg(Surv(time = ovarian$futime, event = ovarian$fustat) ~ resid.ds, data = ovarian)
+coef(wbmod1)
+```
+The resid.dsyes coefficient is negative which means patients with residual disease tend to die early.
+
+```{r}
+#Interpreting coefficients
+wbmod2 <- survreg(Surv(time = ovarian$futime, event = ovarian$fustat) ~ age_group, data = ovarian)
+coef(wbmod2)
+
+```
+
+
+```{r}
+
+
+```
+
+
+```{r}
+
+
+
+````
